@@ -371,62 +371,6 @@ COMMENT ON FUNCTION cyanaudit.fn_update_audit_fields( varchar )
 
 ---- INTERNAL UTILITY FUNCTIONS ----
 
--- fn_get_email_by_uid
-CREATE OR REPLACE FUNCTION cyanaudit.fn_get_email_by_uid
-(
-    in_uid  integer
-)
-returns varchar
-language plpgsql stable strict
-as $_$
-declare
-    my_email                varchar;
-    my_query                varchar;
-    my_user_table_uid_col   varchar;
-    my_user_table           varchar;
-    my_user_table_email_col varchar;
-begin
-    select value
-      into my_user_table
-      from cyanaudit.tb_config
-     where name = 'user_table';
-     
-    select value
-      into my_user_table_uid_col
-      from cyanaudit.tb_config
-     where name = 'user_table_uid_col';
-     
-    select value
-      into my_user_table_email_col
-      from cyanaudit.tb_config
-     where name = 'user_table_email_col';
-     
-    if my_user_table            IS NULL OR
-       my_user_table_uid_col    IS NULL OR
-       my_user_table_email_col  IS NULL
-    then
-        return null;
-    end if;
-
-    my_query := 'SELECT ' || quote_ident(my_user_table_email_col)
-             || '  FROM ' || quote_ident(my_user_table)
-             || ' WHERE ' || quote_ident(my_user_table_uid_col)
-                          || ' = ' || quote_nullable(in_uid);
-    execute my_query
-       into my_email;
-
-    return my_email;
-exception
-    when undefined_table then
-         raise notice 'cyanaudit: Invalid user_table setting: ''%''', my_user_table;
-         return null;
-    when undefined_column then
-         raise notice 'cyanaudit: Invalid user_table_uid_col (''%'') or user_table_email_col (''%'')',
-            my_user_table_uid_col, my_user_table_email_col;
-         return null;
-end
- $_$;
-
 
 
 -- fn_get_uid_by_username
@@ -1497,7 +1441,6 @@ returns setof text as
 CREATE OR REPLACE VIEW cyanaudit.vw_audit_log as
    select ae.recorded,
           ae.uid,
-          cyanaudit.fn_get_email_by_uid(ae.uid) as user_email,
           ae.txid,
           att.label as description,
           (case when af.table_schema = any(current_schemas(true))
@@ -1566,7 +1509,6 @@ COMMENT ON VIEW cyanaudit.vw_undo_statement
 INSERT INTO cyanaudit.tb_config (name, value)
 VALUES ('user_table', null),
        ('user_table_username_col', null),
-       ('user_table_email_col', null),
        ('user_table_uid_col', null),
        ('archive_tablespace', 'pg_default')
 ON CONFLICT DO NOTHING;
