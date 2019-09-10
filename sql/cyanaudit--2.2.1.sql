@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS cyanaudit.tb_audit_event
     audit_field             integer not null references cyanaudit.tb_audit_field,
     pk_vals                 text[] not null,
     recorded                timestamp not null default clock_timestamp(),
-    uid                     integer not null,
+    uid                     uuid,
     row_op                  char(1) not null,
     txid                    bigint not null default txid_current(),
     audit_transaction_type  integer references cyanaudit.tb_audit_transaction_type,
@@ -115,39 +115,28 @@ COMMENT ON TABLE cyanaudit.tb_audit_event
 -- fn_set_current_uid
 CREATE OR REPLACE FUNCTION cyanaudit.fn_set_current_uid
 (
-    in_uid   integer
+    in_uid   uuid
 )
-returns integer
+returns uuid
 language sql strict
 as $_$
-    select set_config( 'cyanaudit.uid', in_uid::varchar, false )::integer;
+    select set_config( 'cyanaudit.uid', in_uid::varchar, false )::uuid;
  $_$;
 
-COMMENT ON FUNCTION cyanaudit.fn_set_current_uid( integer )
+COMMENT ON FUNCTION cyanaudit.fn_set_current_uid( uuid )
     IS 'Sets the uid to which future operations in this session will be attributed.';
 
 
 -- fn_get_current_uid
 CREATE OR REPLACE FUNCTION cyanaudit.fn_get_current_uid()
-returns integer
-language plpgsql stable
+returns uuid
+language sql stable
 as $_$
-declare
-    my_uid    integer;
-begin
-    my_uid := nullif( current_setting( 'cyanaudit.uid', true ), '' );
-
-    if my_uid is null or my_uid < 0 then
-        select cyanaudit.fn_get_uid_by_username( current_user::varchar )
-          into my_uid;
-    end if;
-
-    return cyanaudit.fn_set_current_uid( coalesce( my_uid, 0 ) );
-end
- $_$;
+ select nullif(current_setting('cyanaudit.uid', true), '')::uuid;
+$_$;
 
 COMMENT ON FUNCTION cyanaudit.fn_get_current_uid()
-    IS 'Returns the uid set by fn_set_current_uid(), or 0 if unset..';
+    IS 'Returns the uid set by fn_set_current_uid(), or null if unset';
 
 
 
@@ -370,65 +359,6 @@ COMMENT ON FUNCTION cyanaudit.fn_update_audit_fields( varchar )
 
 
 ---- INTERNAL UTILITY FUNCTIONS ----
-
-
-
--- fn_get_uid_by_username
-CREATE OR REPLACE FUNCTION cyanaudit.fn_get_uid_by_username
-(
-    in_username varchar
-)
-returns integer
-language plpgsql stable strict
-as $_$
-declare
-    my_uid                      varchar;
-    my_query                    varchar;
-    my_user_table_uid_col       varchar;
-    my_user_table               varchar;
-    my_user_table_username_col  varchar;
-begin
-    select value
-      into my_user_table
-      from cyanaudit.tb_config
-     where name = 'user_table';
-     
-    select value
-      into my_user_table_uid_col
-      from cyanaudit.tb_config
-     where name = 'user_table_uid_col';
-     
-    select value
-      into my_user_table_username_col
-      from cyanaudit.tb_config
-     where name = 'user_table_username_col';
-     
-    if my_user_table                IS NULL OR
-       my_user_table_uid_col        IS NULL OR
-       my_user_table_username_col   IS NULL
-    then
-        return null;
-    end if;
-
-    my_query := 'select ' || quote_ident(my_user_table_uid_col)
-             || '  from ' || quote_ident(my_user_table)
-             || ' where ' || quote_ident(my_user_table_username_col)
-                          || ' = ' || quote_nullable(in_username);
-    execute my_query
-       into my_uid;
-
-    return my_uid;
-exception
-    when undefined_table then
-         raise notice 'cyanaudit: Invalid user_table setting: ''%''', my_user_table;
-         return null;
-    when undefined_column then
-         raise notice 'cyanaudit: Invalid user_table_uid_col (''%'') or user_table_username_col (''%'')',
-            my_user_table_uid_col, my_user_table_username_col;
-         return null;
-end
- $_$;
-
 
 -- fn_get_table_pk_cols
 CREATE OR REPLACE FUNCTION cyanaudit.fn_get_table_pk_cols
